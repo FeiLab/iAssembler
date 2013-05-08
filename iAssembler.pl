@@ -1,63 +1,4 @@
 #!/usr/bin/perl -w
-=head1 NAME
-
- iAssembler - 
-
-=head1 DESCRIPTION
- 
- Author : Yi zheng
- E-mail : bioinfo@cornell.edu
- Update : 07/20/2012
-
-=head1 UPDATE INFO
-
-* iAssembler v1.32 - 07/20/12. Changes from previous version:
-	1. Fixed a bug in parsing megablast result (query length info)
-
-* iAssembler v1.31 - 03/28/12. Changes from previous version:
-        1. support MIRA V3.4.0. iAssembler will not support the old version of MIRA from this update.
-
-* iAssembler v1.30 - 05/04/11. Changes from previous version:
-	1. Add a function to correct unigene base errors
-	2. Add headers to the output SAM file:
-
-* iAssembler v1.22 - 03/28/10. Changes from previous version:
-        1. Fixed -h parameters that previously was not working on MIRA and cap3.
-	2. Remove 10bp buffer settings for -e parameter
-	3. Fixed failed-run problem for running the same project at the second time 
-	4. Fixed failed-run problem of mira caused by high megahub rate, set mnr=yes.
-
-* iAssembler v1.21 - 12/02/10. Changes from previous version:
-	1. Changed minimum number of -e parameters to 6, to be compatible with cap3.
-
-* iAssembler v1.2 - 08/02/10. Changes from previous version:
-	1. Compatible with MIRA version 3.x
-
-* iAssembler v1.1 - 06/23/10. Changes from previous version:
-	1. Fixed the error that caused EST clustering to fail for datasets containing highly redundant sequences
-	2. Fixed several other small bugs
-
-* iAssembler v1.0 - 05/21/10. Changes from previous version:
-	1. Added an output file in SAM format. The file contains the alignment information of each sequence read to its corresponding unigene and can be views by several visualization programs such as Tablet and IGV.
-	2. Combined percent identity cutoff for clustering (-x) and assembly (-p) into a single parameter (-p). Parameter -x is disabled
-	3. Disabled clustering using blastn. Currently only megablast is used for clustering. Parameter -b now has different meaning (see below)
-	4. Added -b parameter which specifies the number of threads used for MIRA assembly program
-	5. Added -d parameter to control whether to generate program log files
-
-* iAssembler v1.0 (beta) - 04/13/10
-
-
-#######################################################################
- May 06 2010: 3 bugs fixed
- 1. endless loop at error correct step.
- 2. using same percent identity parameter for clustering and assembling.
- 3. pass long sequence to next step.
- 4. using megablast in perl assembler
- 5. using default parameter run megablast
- 6. delete temp file when assemble using mira cap3 and perl
-#######################################################################
-
-=cut
 use strict;
 use Cwd;
 use File::Basename;
@@ -79,7 +20,8 @@ USAGE:
 	-e  [Integer]  maximum length of end clips (6~100; default = 30)
 	-h  [Integer]  minimum overlap length (>=30; default = 40)
 	-p  [Integer]  minimum percent identify for sequence clustering and assembly (95~100; default = 97) 
-
+	-m             disable cap3 and mira.
+	-c	       only for sequences assembled from strand specific RNA-seq.
 	Section 3: Output parameters
 	-u  [String]   prefix used for IDs of the assembled unigenes (default = UN)
 		       iAssembler names the resulted unigenes with a prefix and trailing numbers, e.g., UN00001
@@ -95,7 +37,7 @@ USAGE:
 #################################################################
 my %options;
 
-getopts('i:q:a:b:e:h:p:u:l:s:o:d', \%options) || die "$usage\nError getting options!";
+getopts('i:q:a:b:e:h:p:u:l:s:o:dmc', \%options) || die "$usage\nError getting options!";
 
 # Section 1: Input parameters
 my $fasta_file  = $options{i} || die $usage."\nYou must provide input file (-i)!\n\n";
@@ -107,6 +49,8 @@ my $cpus_mira   = $options{b} || 1;
 my $max_end_clip= $options{e} || 30;
 my $min_overlap = $options{h} || 40;
 my $min_identity= $options{p} || 97;
+my $disable_AE  = $options{m} || 0;      # disable assembly engine
+my $strand_specific = $options{c} || 0;	# align seq for strand specific mode
 
 # Section 3: Output parameters
 my $id_prefix   = $options{u} || "UN";
@@ -129,6 +73,13 @@ iAssembler starts at: $start_time
 my ($blast_program, $blast_param);
 $blast_program = "megablast";
 $blast_param = "-F F -a $cpus -e 1e-5 -W 20";
+#$blast_param = "-F F -a $cpus -e 1e-5 -W 5 -q -1 -G 2 -E 1"; # edit sunhh
+# $blast_param = "-F F -a $cpus -e 1e-2 -W 5 -q -1 -G 2 -E 1"; # edit sunhh
+$blast_param = "-F F -a $cpus -e 1e-5 -W 20 -q -1 -G 2 -E 1"; # edit sunhh
+if ($strand_specific)#这个参数表示，所有的转录子都是一个反向
+{
+	$blast_param .= " -S 1";
+}
 
 #################################################################
 # Check input parameters & Store them to %ENV                   #
@@ -139,8 +90,10 @@ if ($cpus_mira <= 0 || $cpus_mira > 99 )
 { die $usage."\n Error at number of CPUs used for MIRA program (default = 1, From 1 to 99)"; }
 
 if (    $max_end_clip <= 100 &&
-        $max_end_clip >= 6 &&
-        $min_overlap  >= 30 &&
+#        $max_end_clip >= 6 &&
+	$max_end_clip >= 4 && # edit sunhh
+#        $min_overlap  >= 30 &&
+	$min_overlap  >= 15 && # edit sunhh
         $min_identity >= 95 &&
         $min_identity <= 100  )
 {
@@ -173,7 +126,7 @@ $ENV{'blast_param'}   = $blast_param;
 # 5. program_bin_dir: the path of other assemblers and script   #
 # 6. log_dir: the path of log files                             #
 #################################################################
-my $current_dir = getcwd;
+my $current_dir = getcwd;#获得当前目录
 my $working_dir = $current_dir."/".$fasta_file."_Assembly";
 $output_dir  = $current_dir."/".$output_dir;
 my $log_dir  = $output_dir."/log";
@@ -213,14 +166,14 @@ $ENV{"mira_version"} = "2.9.43";
 #########################################################################
 my ($pipeline_file, $pipeline_manual);
 
-if ($pipeline_manual)
+if ($pipeline_manual)#这个变量没有输入，因此肯定为空，所以这句判断没用
 {
 	$pipeline_file = $pipeline_manual;
 }
 else
 {
 	$pipeline_file = $working_dir."/pipeline.auto";
-	if (-s $pipeline_file) { unlink($pipeline_file);}
+	if (-s $pipeline_file) { unlink($pipeline_file);}#如果该文件已经存在，必须删除
 	my $paf = IO::File->new(">".$pipeline_file) || die "Can no open auto pipeline file $!\n";
 
 	#########################################################
@@ -251,6 +204,7 @@ else
 	if ( $version_number =~ /V2\.9/ )
 	{
 		$ENV{"mira_version"} = $version_number;
+		#把下面文字输出到文件pipeline.auto"
 		print $paf qq'
 #################################################################
 # iAssembly Pipeline Config File V0.1				#
@@ -367,13 +321,27 @@ my $debug_line = "======================================================";
 
 #convert input config file to a pipeline text 
 #and then run the pipeline text.
-my $pipeline_text = parse_pipeline_cfg($pipeline_file);
+my $pipeline_text = parse_pipeline_cfg($pipeline_file);#把参数从文件中写到一个文本中
 
-my $last_out = parse_pipeline_text($pipeline_text);
+# my $last_out = parse_pipeline_text($pipeline_text);
 
-my @last_out = split(/#/, $last_out);
-my $last_out_uniseq; my $last_out_cmf;
-if ($last_out[1] && $last_out[2]) { $last_out_uniseq = $last_out[1]; $last_out_cmf = $last_out[2];}else{ die "Error! No Last Out!\n";}
+# my @last_out = split(/#/, $last_out);
+# my $last_out_uniseq; my $last_out_cmf;
+# if ($last_out[1] && $last_out[2]) { $last_out_uniseq = $last_out[1]; $last_out_cmf = $last_out[2];}else{ die "Error! No Last Out!\n";}
+
+my $last_out; my $last_out_uniseq; my $last_out_cmf;
+if ($disable_AE) {
+	$last_out_uniseq = $fasta_file;
+	$last_out_cmf = $working_dir."/init_cmf";
+	my $ifh = IO::File->new(">".$last_out_cmf) || die "Can not open file $last_out_cmf\n";
+	print $ifh " \n";
+	$ifh->close;	
+}else{
+	$last_out = parse_pipeline_text($pipeline_text);
+	die "this is the break\n";
+	my @last_out = split(/#/, $last_out);
+	if ($last_out[1] && $last_out[2]) { $last_out_uniseq = $last_out[1]; $last_out_cmf = $last_out[2];}else{ die "Error! No Last Out!\n";}
+}
 
 #########################################################################
 # process the results of perl assembly then correct errors		#
@@ -620,7 +588,7 @@ sub parse_pipeline_text
 		write_log("Command: $command\n") if $debug_mode == 1;
 		system($command) && die "Error at command: $command\n"; 
 	}
-	#print $last_output."\n";
+	print $last_output."\n";
 	return $last_output;
 }
 
