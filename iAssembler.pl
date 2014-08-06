@@ -50,7 +50,7 @@ my $cpus_mira   = $options{b} || 1;
 my $max_end_clip= $options{e} || 30;
 my $min_overlap = $options{h} || 40;
 my $min_identity= $options{p} || 97;
-my $disable_AE  = $options{m} || 0;      # disable assembly engine
+my $disable_AE  = $options{m} || 0;     # disable assembly engine
 my $strand_specific = $options{c} || 0;	# align seq for strand specific mode
 
 # Section 3: Output parameters
@@ -339,7 +339,7 @@ if ($disable_AE) {
 	$ifh->close;	
 }else{
 	$last_out = parse_pipeline_text($pipeline_text);
-	die "this is the break\n";
+	#die "this is the break\n";
 	my @last_out = split(/#/, $last_out);
 	if ($last_out[1] && $last_out[2]) { $last_out_uniseq = $last_out[1]; $last_out_cmf = $last_out[2];}else{ die "Error! No Last Out!\n";}
 }
